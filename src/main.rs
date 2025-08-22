@@ -1,36 +1,70 @@
+use native_tls::TlsConnector;
 use std::collections::HashMap;
+use std::env;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 
 struct URL {
+    scheme: String,
     host: String,
     path: String,
+    port: u16,
 }
 
 impl URL {
     fn new(url: String) -> Self {
+        let (scheme, url) = url.split_once("://").expect("Invalid URL format");
+        assert!(
+            scheme == "http" || scheme == "https",
+            "Only HTTP and HTTPS schemes are supported"
+        );
+
+        let port = if scheme == "http" { 80 } else { 443 };
+
         let url = if !url.contains('/') {
             format!("{}/", url)
         } else {
-            url
+            url.to_string()
         };
 
-        let parts: Vec<&str> = url.splitn(2, '/').collect();
-        let host = parts[0].to_string();
-        let path = format!("/{}", parts[1]);
+        let (host, path_part) = url.split_once('/').expect("Invalid URL format");
+        let host = host.to_string();
+        let path = format!("/{}", path_part);
 
-        URL { host, path }
+        URL {
+            scheme: scheme.to_string(),
+            host,
+            path,
+            port,
+        }
     }
 
     fn request(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let mut stream = TcpStream::connect(format!("{}:80", self.host))?;
+        let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
 
         let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
 
-        stream.write_all(request.as_bytes())?;
+        if self.scheme == "https" {
+            let connector = TlsConnector::new()?;
+            let mut stream = connector.connect(&self.host, stream)?;
 
-        let mut reader = BufReader::new(&stream);
+            stream.write_all(request.as_bytes())?;
 
+            let mut reader = BufReader::new(stream);
+            self.read_response(&mut reader)
+        } else {
+            let mut stream = stream;
+            stream.write_all(request.as_bytes())?;
+
+            let mut reader = BufReader::new(&stream);
+            self.read_response(&mut reader)
+        }
+    }
+
+    fn read_response<R: Read>(
+        &self,
+        reader: &mut BufReader<R>,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         // Read status line
         let mut status_line = String::new();
         reader.read_line(&mut status_line)?;
@@ -66,10 +100,37 @@ impl URL {
     }
 }
 
+fn show(body: &str) {
+    let mut in_tag = false;
+
+    for c in body.chars() {
+        if c == '<' {
+            in_tag = true;
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            print!("{}", c);
+        }
+    }
+}
+
+fn load(url: URL) -> Result<(), Box<dyn std::error::Error>> {
+    let body = url.request()?;
+    show(&body);
+    Ok(())
+}
+
 fn main() {
-    let url = URL::new("example.com".to_string());
-    match url.request() {
-        Ok(content) => println!("{}", content),
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        eprintln! {"Usage: {} <url>", args[0]};
+        std::process::exit(1);
+    }
+
+    let url = URL::new(args[1].clone());
+    match load(url) {
+        Ok(_) => {}
         Err(e) => eprintln!("Error: {}", e),
     }
 }
