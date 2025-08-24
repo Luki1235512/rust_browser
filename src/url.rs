@@ -50,29 +50,25 @@ impl URL {
 
     fn request(&self) -> Result<String, Box<dyn std::error::Error>> {
         let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
-
         let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
 
         if self.scheme == "https" {
             let connector = TlsConnector::new()?;
-            let mut stream = connector.connect(&self.host, stream)?;
-
-            stream.write_all(request.as_bytes())?;
-
-            let mut reader = BufReader::new(stream);
-            self.read_response(&mut reader)
+            let mut tls_stream = connector.connect(&self.host, stream)?;
+            tls_stream.write_all(request.as_bytes())?;
+            let reader = BufReader::new(tls_stream);
+            self.read_response(reader)
         } else {
-            let mut stream = stream;
-            stream.write_all(request.as_bytes())?;
-
-            let mut reader = BufReader::new(&stream);
-            self.read_response(&mut reader)
+            let mut tcp_stream = stream;
+            tcp_stream.write_all(request.as_bytes())?;
+            let reader = BufReader::new(tcp_stream);
+            self.read_response(reader)
         }
     }
 
     fn read_response<R: Read>(
         &self,
-        reader: &mut BufReader<R>,
+        mut reader: BufReader<R>,
     ) -> Result<String, Box<dyn std::error::Error>> {
         // Read status line
         let mut status_line = String::new();
