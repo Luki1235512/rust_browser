@@ -19,7 +19,7 @@ impl URL {
             "Only HTTP and HTTPS schemes are supported"
         );
 
-        let port = if scheme == "http" { 80 } else { 443 };
+        let default_port = if scheme == "http" { 80 } else { 443 };
 
         let url = if !url.contains('/') {
             format!("{}/", url)
@@ -27,8 +27,18 @@ impl URL {
             url.to_string()
         };
 
-        let (host, path_part) = url.split_once('/').expect("Invalid URL format");
-        let host = host.to_string();
+        let (host_part, path_part) = url.split_once('/').expect("Invalid URL format");
+
+        let (host, port) = if host_part.contains(':') {
+            let (h, p) = host_part.split_once(':').expect("Invalid host:port format");
+            (
+                h.to_string(),
+                p.parse::<u16>().expect("Invalid port number"),
+            )
+        } else {
+            (host_part.to_string(), default_port)
+        };
+
         let path = format!("/{}", path_part);
 
         URL {
