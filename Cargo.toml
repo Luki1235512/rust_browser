@@ -5,3 +5,11 @@ edition = "2024"
 
 [dependencies]
 native-tls = "0.2"
+
+[lib]
+name = "rust_browser"
+path = "src/url.rs"
+
+[[bin]]
+name = "rust_browser"
+path = "src/main.rs"
