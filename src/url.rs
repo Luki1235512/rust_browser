@@ -107,22 +107,6 @@ impl URL {
 
         Ok(content)
     }
-
-    pub fn scheme(&self) -> &str {
-        &self.scheme
-    }
-
-    pub fn host(&self) -> &str {
-        &self.host
-    }
-
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-
-    pub fn port(&self) -> u16 {
-        self.port
-    }
 }
 
 fn show(body: &str) {
