@@ -50,7 +50,17 @@ impl URL {
 
     fn request(&self) -> Result<String, Box<dyn std::error::Error>> {
         let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
-        let request = format!("GET {} HTTP/1.0\r\nHost: {}\r\n\r\n", self.path, self.host);
+
+        let mut headers = HashMap::new();
+        headers.insert("Host", self.host.as_str());
+        headers.insert("Connection", "close");
+        headers.insert("User-Agent", "RustBrowser/1.0");
+
+        let mut request = format!("GET {} HTTP/1.1\r\n", self.path);
+        for (key, value) in &headers {
+            request.push_str(&format!("{}: {}\r\n", key, value));
+        }
+        request.push_str("\r\n");
 
         if self.scheme == "https" {
             let connector = TlsConnector::new()?;
