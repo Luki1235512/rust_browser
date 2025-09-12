@@ -1,14 +1,18 @@
 use rust_browser::{URL, load};
 
+mod utils;
+use utils::create_test_file;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
 
-    if args.len() != 2 {
-        eprintln!("Usage: {} <url>", args[0]);
-        std::process::exit(1);
-    }
+    let url = if args.len() > 1 {
+        URL::new(args[1].clone())
+    } else {
+        create_test_file()?;
+        URL::default_file()
+    };
 
-    let url = URL::new(args[1].clone());
     load(url)?;
     Ok(())
 }

@@ -2,6 +2,8 @@ use native_tls::TlsConnector;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+use std::path::PathBuf;
+use std::{env, fs};
 
 pub struct URL {
     scheme: String,
@@ -14,9 +16,26 @@ impl URL {
     pub fn new(url: String) -> Self {
         let (scheme, url) = url.split_once("://").expect("Invalid URL format");
         assert!(
-            scheme == "http" || scheme == "https",
-            "Only HTTP and HTTPS schemes are supported"
+            scheme == "http" || scheme == "https" || scheme == "file",
+            "Only HTTP, HTTPS and file schemes are supported"
         );
+
+        if scheme == "file" {
+            let path = {
+                if url.starts_with('/') && url.len() > 3 && url.chars().nth(2) == Some(':') {
+                    url[1..].to_string()
+                } else {
+                    url.to_string()
+                }
+            };
+
+            return URL {
+                scheme: scheme.to_string(),
+                host: String::new(),
+                path,
+                port: 0,
+            };
+        }
 
         let default_port = if scheme == "http" { 80 } else { 443 };
 
@@ -48,7 +67,23 @@ impl URL {
         }
     }
 
+    pub fn default_file() -> Self {
+        let current_dir = env::current_dir().expect("Failed to get current directory");
+        let test_file_path = current_dir.join("tmp").join("test.html");
+
+        URL {
+            scheme: "file".to_string(),
+            host: String::new(),
+            path: test_file_path.to_string_lossy().to_string(),
+            port: 0,
+        }
+    }
+
     fn request(&self) -> Result<String, Box<dyn std::error::Error>> {
+        if self.scheme == "file" {
+            return self.read_file();
+        }
+
         let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
 
         let mut headers = HashMap::new();
@@ -74,6 +109,12 @@ impl URL {
             let reader = BufReader::new(tcp_stream);
             self.read_response(reader)
         }
+    }
+
+    fn read_file(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let path = PathBuf::from(&self.path);
+        let content = fs::read_to_string(path)?;
+        Ok(content)
     }
 
     fn read_response<R: Read>(
