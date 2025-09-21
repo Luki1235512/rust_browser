@@ -180,15 +180,50 @@ impl URL {
 
 fn show(body: &str) {
     let mut in_tag = false;
+    let mut chars = body.chars().peekable();
 
-    for c in body.chars() {
-        if c == '<' {
-            in_tag = true;
-        } else if c == '>' {
-            in_tag = false;
-        } else if !in_tag {
-            print!("{}", c);
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            '&' if !in_tag => {
+                let entity = parse_entity(&mut chars);
+                print!("{}", decode_entity(&entity));
+            }
+            _ if !in_tag => print!("{}", c),
+            _ => {}
         }
+    }
+}
+
+fn parse_entity(chars: &mut std::iter::Peekable<std::str::Chars>) -> String {
+    let mut entity = String::new();
+
+    while let Some(&ch) = chars.peek() {
+        if ch == ';' {
+            chars.next();
+            break;
+        }
+        if ch.is_ascii_alphanumeric() {
+            entity.push(ch);
+            chars.next();
+        } else {
+            break;
+        }
+    }
+
+    entity
+}
+
+fn decode_entity(entity: &str) -> String {
+    if entity.is_empty() {
+        return "&".to_string();
+    }
+
+    match entity {
+        "lt" => "<".to_string(),
+        "gt" => ">".to_string(),
+        _ => format!("&{};", entity),
     }
 }
 
