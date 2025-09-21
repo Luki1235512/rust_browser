@@ -1,28 +1,19 @@
 use std::{env, fs};
 
 pub fn create_test_file() -> Result<(), Box<dyn std::error::Error>> {
-    let test_content = r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>RustBrowser Test Page</title>
-</head>
-<body>
-    <h1>Welcome to RustBrowser!</h1>
-    <p>This is a test HTML file for the RustBrowser.</p>
-    <p>You can edit this file to test different HTML content.</p>
-    <ul>
-        <li>First item</li>
-        <li>Second item</li>
-        <li>Third item</li>
-    </ul>
-</body>
+    let test_content = r#"<html>
+    <body>
+        <div>This is a simple</div>
+        <div>web page with some</div>
+        <span>text in it.</span>
+    </body>
 </html>"#;
 
     let current_dir = env::current_dir().expect("Failed to get current directory");
-    let tmp_dir = current_dir.join("tmp");
-    let test_file_path = tmp_dir.join("test.html");
+    let some_dir = current_dir.join("some").join("directory");
+    let test_file_path = some_dir.join("example1-simple.html");
 
-    fs::create_dir_all(&tmp_dir)?;
+    fs::create_dir_all(&some_dir)?;
 
     fs::write(&test_file_path, test_content)?;
     println!("Created test file at: {}", test_file_path.display());

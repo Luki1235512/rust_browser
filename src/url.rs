@@ -69,7 +69,10 @@ impl URL {
 
     pub fn default_file() -> Self {
         let current_dir = env::current_dir().expect("Failed to get current directory");
-        let test_file_path = current_dir.join("tmp").join("test.html");
+        let test_file_path = current_dir
+            .join("some")
+            .join("directory")
+            .join("example1-simple.html");
 
         URL {
             scheme: "file".to_string(),
