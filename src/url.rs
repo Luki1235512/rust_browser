@@ -30,7 +30,7 @@ impl URL {
 
         assert!(
             scheme == "http" || scheme == "https" || scheme == "file" || scheme == "data",
-            "Only HTTP, HTTPS, files and data schemes are supported"
+            "Only HTTP, HTTPS, file and data schemes are supported"
         );
 
         if scheme == "data" {
@@ -45,7 +45,6 @@ impl URL {
 
         if scheme == "file" {
             let path = url.trim_start_matches('/').to_string();
-
             return URL {
                 scheme: scheme.to_string(),
                 host: String::new(),
