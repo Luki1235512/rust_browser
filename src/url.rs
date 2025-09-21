@@ -14,20 +14,23 @@ pub struct URL {
 
 impl URL {
     pub fn new(url: String) -> Self {
-        let (scheme, url) = url.split_once("://").expect("Invalid URL format");
+        let (scheme, url) = url.split_once(":").expect("Invalid URL format");
         assert!(
-            scheme == "http" || scheme == "https" || scheme == "file",
-            "Only HTTP, HTTPS and file schemes are supported"
+            scheme == "http" || scheme == "https" || scheme == "file" || scheme == "data",
+            "Only HTTP, HTTPS, files and data schemes are supported"
         );
 
-        if scheme == "file" {
-            let path = {
-                if url.starts_with('/') && url.len() > 3 && url.chars().nth(2) == Some(':') {
-                    url[1..].to_string()
-                } else {
-                    url.to_string()
-                }
+        if scheme == "data" {
+            return URL {
+                scheme: scheme.to_string(),
+                host: String::new(),
+                path: url.to_string(),
+                port: 0,
             };
+        }
+
+        if scheme == "file" {
+            let path = url.trim_start_matches('/').to_string();
 
             return URL {
                 scheme: scheme.to_string(),
@@ -38,6 +41,12 @@ impl URL {
         }
 
         let default_port = if scheme == "http" { 80 } else { 443 };
+
+        let url = if url.starts_with("//") {
+            &url[2..]
+        } else {
+            url
+        };
 
         let url = if !url.contains('/') {
             format!("{}/", url)
@@ -83,6 +92,10 @@ impl URL {
     }
 
     fn request(&self) -> Result<String, Box<dyn std::error::Error>> {
+        if self.scheme == "data" {
+            return self.read_data();
+        }
+
         if self.scheme == "file" {
             return self.read_file();
         }
@@ -112,6 +125,12 @@ impl URL {
             let reader = BufReader::new(tcp_stream);
             self.read_response(reader)
         }
+    }
+
+    fn read_data(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let comma_pos = self.path.find(',').expect("Invalid data URL format");
+        let data = &self.path[comma_pos + 1..];
+        Ok(data.to_string())
     }
 
     fn read_file(&self) -> Result<String, Box<dyn std::error::Error>> {
