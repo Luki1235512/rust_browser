@@ -10,11 +10,24 @@ pub struct URL {
     host: String,
     path: String,
     port: u16,
+    view_source: bool,
 }
 
 impl URL {
     pub fn new(url: String) -> Self {
         let (scheme, url) = url.split_once(":").expect("Invalid URL format");
+
+        if scheme == "view-source" {
+            let inner_url = URL::new(url.to_string());
+            return URL {
+                scheme: inner_url.scheme,
+                host: inner_url.host,
+                path: inner_url.path,
+                port: inner_url.port,
+                view_source: true,
+            };
+        }
+
         assert!(
             scheme == "http" || scheme == "https" || scheme == "file" || scheme == "data",
             "Only HTTP, HTTPS, files and data schemes are supported"
@@ -26,6 +39,7 @@ impl URL {
                 host: String::new(),
                 path: url.to_string(),
                 port: 0,
+                view_source: false,
             };
         }
 
@@ -37,6 +51,7 @@ impl URL {
                 host: String::new(),
                 path,
                 port: 0,
+                view_source: false,
             };
         }
 
@@ -73,6 +88,7 @@ impl URL {
             host,
             path,
             port,
+            view_source: false,
         }
     }
 
@@ -88,6 +104,7 @@ impl URL {
             host: String::new(),
             path: test_file_path.to_string_lossy().to_string(),
             port: 0,
+            view_source: false,
         }
     }
 
@@ -229,6 +246,10 @@ fn decode_entity(entity: &str) -> String {
 
 pub fn load(url: URL) -> Result<(), Box<dyn std::error::Error>> {
     let body = url.request()?;
-    show(&body);
+    if url.view_source {
+        print!("{}", body)
+    } else {
+        show(&body);
+    }
     Ok(())
 }

@@ -6,9 +6,9 @@ A simple web browser implementation in Rust, following the principles from [Web 
 
 - **HTTP/HTTPS Support**: Fetch web pages using HTTP and HTTPS protocols
 - **File Protocol**: Load local HTML files
-- **Data URLs**: Support for inline data using data: scheme
 - **Basic HTML Rendering**: Strip HTML tags and display text content
-- **TLS/SSL**: Secure HTTPS connections using native TLS
+- **Data URLs**: Support for inline data using `data:` scheme
+- **View Source**: Support for displaying the raw source of any supported URL using the `view-source:` scheme
 
 ### Prerequisites
 
@@ -70,6 +70,12 @@ cargo run http://localhost:8000/example1-simple.html
 
 ```bash
 cargo run "data:text/html,<h1>Hello World</h1>"
+```
+
+### View the raw source of a URL
+
+```bash
+cargo run "view-source:http://example.com"
 ```
 
 ### Test with HTTPBin
