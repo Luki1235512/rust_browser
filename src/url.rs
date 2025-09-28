@@ -3,7 +3,16 @@ use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use std::{env, fs};
+
+static CONNECTION_CACHE: Mutex<Option<HashMap<String, CachedConnection>>> = Mutex::new(None);
+
+struct CachedConnection {
+    stream: TcpStream,
+    is_tls: bool,
+    tls_stream: Option<native_tls::TlsStream<TcpStream>>,
+}
 
 pub struct URL {
     scheme: String,
@@ -91,6 +100,53 @@ impl URL {
         }
     }
 
+    fn get_connection_key(&self) -> String {
+        format!("{}:{}:{}", self.scheme, self.host, self.port)
+    }
+
+    fn get_or_create_connection(&self) -> Result<CachedConnection, Box<dyn std::error::Error>> {
+        let connection_key = self.get_connection_key();
+
+        {
+            let mut cache = CONNECTION_CACHE.lock().unwrap();
+            if cache.is_none() {
+                *cache = Some(HashMap::new());
+            }
+
+            if let Some(ref mut connections) = *cache {
+                if let Some(cached_conn) = connections.remove(&connection_key) {
+                    return Ok(cached_conn);
+                }
+            }
+        }
+
+        let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
+
+        if self.scheme == "https" {
+            let connector = TlsConnector::new()?;
+            let tls_stream = connector.connect(&self.host, stream)?;
+            Ok(CachedConnection {
+                stream: TcpStream::connect(format!("{}:{}", self.host, self.port))?,
+                is_tls: true,
+                tls_stream: Some(tls_stream),
+            })
+        } else {
+            Ok(CachedConnection {
+                stream,
+                is_tls: false,
+                tls_stream: None,
+            })
+        }
+    }
+
+    fn cache_connection(&self, connection: CachedConnection) {
+        let connection_key = self.get_connection_key();
+        let mut cache = CONNECTION_CACHE.lock().unwrap();
+        if let Some(ref mut connections) = *cache {
+            connections.insert(connection_key, connection);
+        }
+    }
+
     pub fn default_file() -> Self {
         let current_dir = env::current_dir().expect("Failed to get current directory");
         let test_file_path = current_dir
@@ -116,11 +172,11 @@ impl URL {
             return self.read_file();
         }
 
-        let stream = TcpStream::connect(format!("{}:{}", self.host, self.port))?;
+        let mut connection = self.get_or_create_connection()?;
 
         let mut headers = HashMap::new();
         headers.insert("Host", self.host.as_str());
-        headers.insert("Connection", "close");
+        headers.insert("Connection", "keep-alive");
         headers.insert("User-Agent", "RustBrowser/1.0");
 
         let mut request = format!("GET {} HTTP/1.1\r\n", self.path);
@@ -129,18 +185,25 @@ impl URL {
         }
         request.push_str("\r\n");
 
-        if self.scheme == "https" {
-            let connector = TlsConnector::new()?;
-            let mut tls_stream = connector.connect(&self.host, stream)?;
-            tls_stream.write_all(request.as_bytes())?;
-            let reader = BufReader::new(tls_stream);
-            self.read_response(reader)
+        let response = if connection.is_tls {
+            if let Some(ref mut tls_stream) = connection.tls_stream {
+                tls_stream.write_all(request.as_bytes())?;
+                let reader = BufReader::new(tls_stream);
+                self.read_response(reader)
+            } else {
+                return Err("TLS stream not available".into());
+            }
         } else {
-            let mut tcp_stream = stream;
-            tcp_stream.write_all(request.as_bytes())?;
-            let reader = BufReader::new(tcp_stream);
+            connection.stream.write_all(request.as_bytes())?;
+            let reader = BufReader::new(&mut connection.stream);
             self.read_response(reader)
+        };
+
+        if response.is_ok() {
+            self.cache_connection(connection);
         }
+
+        response
     }
 
     fn read_data(&self) -> Result<String, Box<dyn std::error::Error>> {
@@ -159,7 +222,6 @@ impl URL {
         &self,
         mut reader: BufReader<R>,
     ) -> Result<String, Box<dyn std::error::Error>> {
-        // Read status line
         let mut status_line = String::new();
         reader.read_line(&mut status_line)?;
         let status_parts: Vec<&str> = status_line.trim().splitn(3, ' ').collect();
@@ -182,13 +244,22 @@ impl URL {
             }
         }
 
-        // Assert conditions
         assert!(!response_headers.contains_key("transfer-encoding"));
         assert!(!response_headers.contains_key("content-encoding"));
 
-        // Read content
-        let mut content = String::new();
-        reader.read_to_string(&mut content)?;
+        let content = if let Some(content_length_str) = response_headers.get("content-length") {
+            let content_length: usize = content_length_str
+                .parse()
+                .map_err(|_| "Invalid Content-Length header")?;
+
+            let mut buffer = vec![0u8; content_length];
+            reader.read_exact(&mut buffer)?;
+            String::from_utf8(buffer)?
+        } else {
+            let mut content = String::new();
+            reader.read_to_string(&mut content)?;
+            content
+        };
 
         Ok(content)
     }
