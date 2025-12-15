@@ -302,7 +302,7 @@ impl URL {
         headers.insert("Host", self.host.as_str());
         headers.insert("Connection", "keep-alive");
         headers.insert("User-Agent", "RustBrowser/1.0");
-        // headers.insert("Accept-Encoding", "gzip");
+        headers.insert("Accept-Encoding", "gzip");
 
         let mut request = format!("GET {} HTTP/1.1\r\n", self.path);
         for (key, value) in &headers {
