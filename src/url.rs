@@ -1,3 +1,4 @@
+use flate2::read::GzDecoder;
 use native_tls::TlsConnector;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -301,6 +302,7 @@ impl URL {
         headers.insert("Host", self.host.as_str());
         headers.insert("Connection", "keep-alive");
         headers.insert("User-Agent", "RustBrowser/1.0");
+        // headers.insert("Accept-Encoding", "gzip");
 
         let mut request = format!("GET {} HTTP/1.1\r\n", self.path);
         for (key, value) in &headers {
@@ -387,21 +389,39 @@ impl URL {
             }
         }
 
-        assert!(!response_headers.contains_key("transfer-encoding"));
-        assert!(!response_headers.contains_key("content-encoding"));
+        let is_chunked = response_headers
+            .get("transfer-encoding")
+            .map(|v| v.contains("chunked"))
+            .unwrap_or(false);
 
-        let content = if let Some(content_length_str) = response_headers.get("content-length") {
+        let is_gzip = response_headers
+            .get("content-encoding")
+            .map(|v| v == "gzip")
+            .unwrap_or(false);
+
+        let raw_body = if is_chunked {
+            self.read_chunked_body(&mut reader)?
+        } else if let Some(content_length_str) = response_headers.get("content-length") {
             let content_length: usize = content_length_str
                 .parse()
                 .map_err(|_| "Invalid Content-Length header")?;
 
             let mut buffer = vec![0u8; content_length];
             reader.read_exact(&mut buffer)?;
-            String::from_utf8(buffer)?
+            buffer
         } else {
-            let mut content = String::new();
-            reader.read_to_string(&mut content)?;
-            content
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer)?;
+            buffer
+        };
+
+        let content = if is_gzip {
+            let mut decoder = GzDecoder::new(&raw_body[..]);
+            let mut decompressed = String::new();
+            decoder.read_to_string(&mut decompressed)?;
+            decompressed
+        } else {
+            String::from_utf8(raw_body)?
         };
 
         if status_code == 200 {
@@ -410,6 +430,37 @@ impl URL {
         }
 
         Ok(content)
+    }
+
+    fn read_chunked_body<R: Read>(
+        &self,
+        reader: &mut BufReader<R>,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let mut body = Vec::new();
+
+        loop {
+            let mut size_line = String::new();
+            reader.read_line(&mut size_line)?;
+            let size_str = size_line.trim().split(';').next().unwrap_or("");
+            let chunk_size =
+                usize::from_str_radix(size_str, 16).map_err(|_| "Invalid chunk size")?;
+
+            if chunk_size == 0 {
+                break;
+            }
+
+            let mut chunk = vec![0u8; chunk_size];
+            reader.read_exact(&mut chunk)?;
+            body.extend_from_slice(&chunk);
+
+            let mut crlf = [0u8; 2];
+            reader.read_exact(&mut crlf)?;
+        }
+
+        let mut trailer_line = String::new();
+        reader.read_line(&mut trailer_line)?;
+
+        Ok(body)
     }
 }
 

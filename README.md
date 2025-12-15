@@ -12,6 +12,8 @@ A simple web browser implementation in Rust, following the principles from [Web 
 - **HTTP Redirects**: Automatic handling of 3xx redirect responses (up to 10 redirects)
 - **Connection Caching**: Reuses TCP/TLS connections to the same server for improved performance
 - **Response Caching**: Caches HTTP responses to avoid redundant downloads
+- **HTTP Compression**: Supports gzip-compressed responses with `Accept-Encoding` header
+- **Chunked Transfer Encoding**: Handles chunked transfer encoding for streaming responses
 
 ### Prerequisites
 
