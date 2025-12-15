@@ -10,6 +10,8 @@ A simple web browser implementation in Rust, following the principles from [Web 
 - **Data URLs**: Support for inline data using `data:` scheme
 - **View Source**: Support for displaying the raw source of any supported URL using the `view-source:` scheme
 - **HTTP Redirects**: Automatic handling of 3xx redirect responses (up to 10 redirects)
+- **Connection Caching**: Reuses TCP/TLS connections to the same server for improved performance
+- **Response Caching**: Caches HTTP responses to avoid redundant downloads
 
 ### Prerequisites
 

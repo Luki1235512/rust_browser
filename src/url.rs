@@ -4,14 +4,36 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 static CONNECTION_CACHE: Mutex<Option<HashMap<String, CachedConnection>>> = Mutex::new(None);
+static RESPONSE_CACHE: Mutex<Option<HashMap<String, CachedResponse>>> = Mutex::new(None);
 
 struct CachedConnection {
     stream: TcpStream,
     is_tls: bool,
     tls_stream: Option<native_tls::TlsStream<TcpStream>>,
+}
+
+struct CachedResponse {
+    content: String,
+    timestamp: u64,
+    max_age: Option<u64>,
+}
+
+impl CachedResponse {
+    fn is_valid(&self) -> bool {
+        if let Some(max_age) = self.max_age {
+            let current_time = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            current_time - self.timestamp < max_age
+        } else {
+            true
+        }
+    }
 }
 
 pub struct URL {
@@ -147,6 +169,97 @@ impl URL {
         }
     }
 
+    fn get_cache_key(&self) -> String {
+        format!("{}://{}:{}{}", self.scheme, self.host, self.port, self.path)
+    }
+
+    fn get_cached_response(&self) -> Option<String> {
+        let cache_key = self.get_cache_key();
+        let mut cache = RESPONSE_CACHE.lock().unwrap();
+
+        if cache.is_none() {
+            *cache = Some(HashMap::new());
+            return None;
+        }
+
+        if let Some(ref mut responses) = *cache {
+            if let Some(cached) = responses.get(&cache_key) {
+                if cached.is_valid() {
+                    return Some(cached.content.clone());
+                } else {
+                    responses.remove(&cache_key);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn cache_response(&self, content: String, cache_control: Option<&str>) {
+        let (should_cache, max_age) = Self::parse_cache_control(cache_control);
+
+        if !should_cache {
+            return;
+        }
+
+        let cache_key = self.get_cache_key();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut cache = RESPONSE_CACHE.lock().unwrap();
+        if cache.is_none() {
+            *cache = Some(HashMap::new());
+        }
+
+        if let Some(ref mut responses) = *cache {
+            responses.insert(
+                cache_key,
+                CachedResponse {
+                    content,
+                    timestamp,
+                    max_age,
+                },
+            );
+        }
+    }
+
+    fn parse_cache_control(cache_control: Option<&str>) -> (bool, Option<u64>) {
+        let Some(header) = cache_control else {
+            return (true, None);
+        };
+
+        let directives: Vec<&str> = header.split(',').map(|s| s.trim()).collect();
+
+        for directive in &directives {
+            if *directive == "no-store" {
+                return (false, None);
+            }
+        }
+
+        let mut max_age = None;
+        let mut has_unknown_directive = false;
+
+        for directive in &directives {
+            if directive.starts_with("max-age=") {
+                if let Some(value_str) = directive.strip_prefix("max-age=") {
+                    if let Ok(seconds) = value_str.parse::<u64>() {
+                        max_age = Some(seconds);
+                    }
+                }
+            } else if *directive != "no-store" {
+                has_unknown_directive = true;
+            }
+        }
+
+        if has_unknown_directive {
+            return (false, None);
+        }
+
+        (true, max_age)
+    }
+
     pub fn default_file() -> Self {
         let current_dir = env::current_dir().expect("Failed to get current directory");
         let test_file_path = current_dir
@@ -176,6 +289,10 @@ impl URL {
 
         if self.scheme == "file" {
             return self.read_file();
+        }
+
+        if let Some(cached_content) = self.get_cached_response() {
+            return Ok(cached_content);
         }
 
         let mut connection = self.get_or_create_connection()?;
@@ -286,6 +403,11 @@ impl URL {
             reader.read_to_string(&mut content)?;
             content
         };
+
+        if status_code == 200 {
+            let cache_control = response_headers.get("cache-control").map(|s| s.as_str());
+            self.cache_response(content.clone(), cache_control);
+        }
 
         Ok(content)
     }
