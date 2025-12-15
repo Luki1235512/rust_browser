@@ -163,7 +163,13 @@ impl URL {
         }
     }
 
-    fn request(&self) -> Result<String, Box<dyn std::error::Error>> {
+    fn request(&self, redirect_count: u8) -> Result<String, Box<dyn std::error::Error>> {
+        const MAX_REDIRECTS: u8 = 10;
+
+        if redirect_count >= MAX_REDIRECTS {
+            return Err("Too many redirects".into());
+        }
+
         if self.scheme == "data" {
             return self.read_data();
         }
@@ -189,14 +195,14 @@ impl URL {
             if let Some(ref mut tls_stream) = connection.tls_stream {
                 tls_stream.write_all(request.as_bytes())?;
                 let reader = BufReader::new(tls_stream);
-                self.read_response(reader)
+                self.read_response(reader, redirect_count)
             } else {
                 return Err("TLS stream not available".into());
             }
         } else {
             connection.stream.write_all(request.as_bytes())?;
             let reader = BufReader::new(&mut connection.stream);
-            self.read_response(reader)
+            self.read_response(reader, redirect_count)
         };
 
         if response.is_ok() {
@@ -221,11 +227,14 @@ impl URL {
     fn read_response<R: Read>(
         &self,
         mut reader: BufReader<R>,
+        redirect_count: u8,
     ) -> Result<String, Box<dyn std::error::Error>> {
         let mut status_line = String::new();
         reader.read_line(&mut status_line)?;
         let status_parts: Vec<&str> = status_line.trim().splitn(3, ' ').collect();
-        let (_version, _status, _explanation) = (status_parts[0], status_parts[1], status_parts[2]);
+        let (_version, status, _explanation) = (status_parts[0], status_parts[1], status_parts[2]);
+
+        let status_code: u16 = status.parse().map_err(|_| "Invalid status code")?;
 
         let mut response_headers: HashMap<String, String> = HashMap::new();
         loop {
@@ -241,6 +250,23 @@ impl URL {
                 let header = line[..colon_pos].to_lowercase();
                 let value = line[colon_pos + 1..].trim().to_string();
                 response_headers.insert(header, value);
+            }
+        }
+
+        if status_code >= 300 && status_code < 400 {
+            if let Some(location) = response_headers.get("location") {
+                let redirect_url = if location.starts_with('/') {
+                    format!("{}://{}{}", self.scheme, self.host, location)
+                } else {
+                    location.clone()
+                };
+
+                let new_url = URL::new(redirect_url);
+                return new_url.request(redirect_count + 1);
+            } else {
+                return Err(
+                    format!("Redirect status {} without Location header", status_code).into(),
+                );
             }
         }
 
@@ -315,7 +341,7 @@ fn decode_entity(entity: &str) -> String {
 }
 
 pub fn load(url: URL) -> Result<(), Box<dyn std::error::Error>> {
-    let body = url.request()?;
+    let body = url.request(0)?;
     if url.view_source {
         print!("{}", body)
     } else {
